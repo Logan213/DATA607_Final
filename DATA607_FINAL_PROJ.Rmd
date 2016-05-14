@@ -1,0 +1,394 @@
+---
+title: "DATA607 FINAL PROJECT"
+subtitle: "NCAA Athletics and College Finances"
+author: "Logan Thomson"
+date: "May 5, 2016"
+output:
+  slidy_presentation: 
+    fig_width: 14
+    fig_height: 9
+---
+
+# Introduction  
+
+```{r load_packages, echo=FALSE, message=FALSE, results='hide'}
+packages <- c("tidyr", "dplyr", "ggplot2", "XML", "xml2", "ggmap")
+lapply(packages, library, character.only = T)
+```
+
+“A very small number of the 1,100 (NCAA members) have a positive cash flow on college sports, so those schools are making a decision that having a successful athletic program is valuable to them despite the fact they have to subsidize it with institutional money. The same thing is true for a lot of academic programs. So every school has to sit down and say, 'What is this worth to us?’ ” - NCAA President & CEO Mark Emmert  
+
+- Are college athletics a huge source of revenue?
+- Do college athletics pose a financial burden?
+- Is there a positive or negative effect on institutions?
+
+# Data Sources
+
+Data                    | Type | Variables                                | Source  
+----------------------- | ---- | ---------------------------------------- | ------  
+NCAA APR | .tsv | Conference, Sub-Divisions, Sports, Academic Performance | http://www.icpsr.umich.edu/icpsrweb/NCAA/studies/26801  
+Knight Foundation | .csv | Academic & Athletic Spending | http://spendingdatabase.knightcommission.org  
+USA Today NCAA Finances | Scraped Web Page | Athletic Expenses & Revenues | http://sports.usatoday.com/ncaa/finances  
+IPEDS | .csv | Admission, Retention, Graduation | http://nces.ed.gov/ipeds/datacenter/Default.aspx  
+
+```{r icpsr, echo=FALSE}
+# open file
+path <- ("https://raw.githubusercontent.com/Logan213/DATA607_Final/master/NCAA_ICPSR.tsv")
+con <- file(path, open="r")
+
+# NCAA ICPSR data for conferences, sub-divisions, and number of sports
+icpsr <- read.csv(con, header=T, sep="\t", stringsAsFactors = F)
+
+# close file
+close(con)
+
+# Select only 2014 data
+icpsr <- icpsr %>%
+  select(SCL_UNITID, SCL_NAME, DIV=SCL_DIV_14, SUB_DIV=SCL_SUB_14, CONFERENCE=CONFNAME_14, PUB_PRIV=SCL_PRIVATE) %>%
+  filter(SUB_DIV > 0) %>%  # Filter out -99 values
+  group_by(SCL_UNITID, SCL_NAME, DIV, SUB_DIV, CONFERENCE, PUB_PRIV) %>%
+  summarise(NUM_SPORTS=n())  # Count number of each sport
+```  
+
+```{r knight_found, echo=FALSE}
+
+# Knight Foundation Data
+
+# open file
+path <- ("https://raw.githubusercontent.com/Logan213/DATA607_Final/master/knight.found.csv")
+con <- file(path, open="r")
+
+knight <- read.csv(con, header=T, stringsAsFactors = F)
+
+# close file
+close(con)
+
+knight <- knight[c(1:5, 7, 9:10, 12, 14, 18, 20, 22, 24, 26, 32, 35:37)]
+knight <- knight[knight$Year == 2014, ]
+knight <- knight[1:231,]
+```  
+
+```{r ipeds, echo=FALSE}
+
+# IPEDS Data
+
+# open file
+path <- ("https://raw.githubusercontent.com/Logan213/DATA607_Final/master/IPEDS_2014.csv")
+con <- file(path, open="r")
+
+ipeds <- read.csv('~/desktop/IPEDS_2014.csv', header=T, stringsAsFactors = F)
+
+# close file
+close(con)
+
+# Select and rename columns
+ipeds <- ipeds[c(1:6, 8:10)]
+
+colnames(ipeds) <- c("unitid", "Inst_Name", "Year", "FT_Retention", "Grad_Rate", "Admission_Rate", "City", "State", "Zip_Code")
+
+#remove "+4" postal codes
+ipeds$Zip_Code <- substring(ipeds$Zip_Code, 1, 5)
+```
+
+
+```{r usa_today, echo=FALSE}
+# USA Today NCAA Finance "database" for expenses and revenues
+
+html_url <- "http://sports.usatoday.com/ncaa/finances"
+html_url <- read_html(html_url)  #Store url
+
+parsed_ncaa <- htmlParse(html_url)  # Parse url and use readHTMLTable
+ncaa_exp_rev <- readHTMLTable(parsed_ncaa)
+
+ncaa_exp_rev <- data.frame(ncaa_exp_rev$`sports-table-scroll-dom`, stringsAsFactors = FALSE)  # Convert to a data frame
+
+# Convert to appropriate columns to character and number
+ncaa_exp_rev[3:6] <- lapply(ncaa_exp_rev[3:6], function(x) as.character(x))
+ncaa_exp_rev[3:6] <- lapply(ncaa_exp_rev[3:6], function(x) as.numeric(gsub('[^0-9.]', '', x)))
+```  
+
+```{r ipeds_codes, echo=FALSE}
+
+# Could not get regex to work for merging on names
+
+# Manually entered column of IPEDS ids to merge data frames on
+ncaa_exp_rev$ipeds <- as.numeric(c(228723, 228778, 204796, 170976, 100751, 134130, 159391, 207500, 221759, 214777, 100858, 240444, 134097, 157085, 139959, 106397, 218663, 174066, 171100, 153658, 209551, 157289, 236948, 181464, 110662, 207388, 163286, 155317, 234076, 178396, 238032, 199120, 151351, 176017, 104179, 145637, 110635, 104151, 217882, 233921, 229115, 139755, 199193, 243780, 176080, 155399, 153603, 129020, 186380, 126614, 209542, 230764, 236939, 201885, 132903, 128328, 122409, 198464, 137351, 182281, 232423, 225511, 232982, 142115, 220862, 141574, 187985, " ", 110556, 126818, 166629, 240727, 172699, 228459, 169798, 110644, 199139, 204024, 130943, 196088, 100663, 200800, 220978, 234030, 227216, 133669, 230728, 157951, 228796, 197869, 106458, 196097, 139940, 204857, 133951, 122755, 102094, 169248, 183044, 147703, 237525, 102368, 188030, 182290, 229027, 156125, 206084, 145813, 110422, 232186, 203517, 218724, 217484, 231624, 179566, 164076, 200280, 176372, 160658, 150136, 180489, 149222, 200332, 159647, 110617, 201441, 139931, 140164, 154095, 161253, 142285, 217819, 180461, 231174, 196060, 110653, 105330, 110583, 221740, 110705, 228431, 219356, 181394, 145600, 110671, 232937, 199148, 226091, 166513, 220075, 227881, 127741, 157401, 163268, 196079, 217864 ,128771, 206695, 219471, 433660, 221847, 100724, 151324, 156620, 185828, 178402, 110608, 171571, 199218, 110565, 240453, 235097, 144892, 110486, 157447, 101480, 209807, 149772, 159993, 160621, 234085, 221838, 233277, 228769, 130934, 106704, 218964, 133650, 160612, 142276, 200004, 230737, 230782, 199102, 202134, 199157, 179557, 157386, 136172, 224147, 219602, 159717, 230603, 160038, 206604, 221768, 227368, 227526, 163453, 100654, 229063, 232566, 106245, 151111, 218733, 149231, 240277, 175856, 159966, 151102, 218742, 175342, 199111, 106412, 144005, 140960, 163338, 159009, 159939, 176044, 162283))
+```
+
+# Overview of Combined Data
+
+```{r merge_df, echo=FALSE}
+# Merge Data Frames
+ncaa <- merge(x=ncaa_exp_rev, y=ipeds, by.x="ipeds", by.y="unitid")
+ncaa <- merge(x=ncaa, y=knight, by.x="ipeds", by.y="IPEDS.ID")
+ncaa <- merge(x=ncaa, y=icpsr, by.x="ipeds", by.y="SCL_UNITID")
+
+# Still a lot of columns, paring some down and renaming
+ncaa <- ncaa %>%
+  select(IPEDS_ID=ipeds, 
+         TOT_ATH_REVENUE=total.revenue, TOT_ATH_EXPENSE=total.expenses,
+         ATH_SUBSIDY=total.subsidy, PCT_SUBSIDY=X..subsidy,
+         FT_RET_RATE=FT_Retention, Grad_Rate, Admit_Rate=Admission_Rate,
+         City, State, Zip_Code, 
+         Institution=Data, FTE.Students, 
+         TOT_ACAD_SPEND=Total.Academic.Spending,
+         TOT_INSTRUC_SPEND=Total.Instructional.Spending,
+         NUM_ATHLETES=Unduplicated.Athletes, 
+         TOT_ATH_SPEND=Total.Athletic.Spending,
+         TOT_FB_SPEND=Total.Football.Spending,
+         TOT_ATH_FUNDING=Total.Institutional.Funding.for.Athletics,
+         COACH_SAL=Total.Coaching.Salaries, 
+         FB_PLYRS=Football.Players, 
+         FB_COACH_SAL=Total.Football.Coaching.Salaries,
+         YR_DEBT_SERV=Annual.Debt.Service.on.Athletic.Facilities,
+         TOT_ATH_DEBT=Total.Debt.Outstanding.on.Athletic.Facilities, 
+         DIV, SUB_DIV, CONFERENCE, PUB_PRIV, NUM_SPORTS)
+
+# Reorder columns
+ncaa <- ncaa[c(1,12,9,10,11,28,13,16,21,8,6,7,25:27,29,14:15,17:18,20,22,19,23:24,2:5)]
+
+# Remove dollar signs, commas, and convert currencies to numeric
+ncaa[17:25] <- lapply(ncaa[17:25], function(x) as.numeric(gsub('[^0-9]', '', x)))
+```  
+
+- Division I institutions only
+
+- Limited to financial data in Knight Foundation and USA Today 
+
+- 29 different variables
+
+- Data on 225 institutions
+
+----
+
+```{r ggmap, echo=FALSE, message=FALSE, cache=TRUE, warning=FALSE}
+# plot athletic spending on map
+ncaa_mapping <- ncaa %>%
+  select(Institution, Zip_Code, CONFERENCE, TOT_ATH_SPEND) %>%
+  filter(Zip_Code != "96822")
+
+for (i in 1:nrow(ncaa_mapping)) {  
+  latlon = geocode(ncaa_mapping[i,2])
+  ncaa_mapping$lon[i] = as.numeric(latlon[1])
+  ncaa_mapping$lat[i] = as.numeric(latlon[2])
+}
+
+us_center = as.numeric(geocode("United States"))
+
+us_map = ggmap(get_googlemap(center=us_center, color="bw", scale=2, zoom=4), extent="panel")
+
+us_map +  
+   geom_point(aes(x=lon, y=lat), data=ncaa_mapping, col="deepskyblue4", alpha=0.3, size=ncaa_mapping$TOT_ATH_SPEND/8500000) +  
+   scale_size_continuous(range=range(ncaa_mapping$TOT_ATH_SPEND)) + 
+  labs(x="Longitude", y="Latitude") + ggtitle("NCAA Div. I Institutions: Athletic Spending")
+```  
+
+```{r millions, echo=FALSE}
+# For re-sizing graph axes
+mil <- 1000000
+```
+
+----
+
+```{r num_teams, echo=FALSE}
+
+# Number of Sports Teams
+
+ncaa %>%
+  ggplot(aes(NUM_SPORTS, fill=factor(SUB_DIV))) + 
+  geom_histogram(bins=20, alpha=0.6) +
+  labs(title="NCAA Sports Per Institution", fill="Div. I Subdivision", x="Number of Sports", y="Count") +
+  scale_fill_discrete(breaks=c(1,2,3), labels=c("FBS", "FCS", "w/o FB")) + 
+    theme(axis.text.x=element_text(size=12), axis.title.x=element_text(size=14),
+        axis.text.y=element_text(size=12), axis.title.y=element_text(size=14),
+        plot.title=element_text(size=20, face="bold"), legend.position = "bottom")
+```  
+
+----
+
+```{r ath_per_student, echo=FALSE}
+
+# Number of Athletes per Student
+
+ncaa %>%
+  ggplot(aes(x=FTE.Students, y=NUM_ATHLETES)) +
+  geom_point(aes(size=NUM_SPORTS, color=factor(SUB_DIV)), alpha=.65) +
+  labs(title="Athletes per FT Enrolled Student", color="Div. I Subdivision", x="FTE Students", y="Unduplicated Athletes") +
+  scale_color_discrete(breaks=c(1,2,3), labels=c("FBS", "FCS", "w/o FB")) +
+  theme(axis.text.x=element_text(size=12), axis.title.x=element_text(size=14),
+        axis.text.y=element_text(size=12), axis.title.y=element_text(size=14),
+        plot.title=element_text(size=20, face="bold"), legend.position = "bottom")
+```  
+
+----
+
+```{r acad_v_ath, echo=FALSE, warning=FALSE}
+
+# Academic Spend vs. Ath Spend
+
+ncaa %>% 
+  ggplot(aes(x=(TOT_ACAD_SPEND/mil), y=(TOT_ATH_SPEND/mil), color=factor(SUB_DIV)), na.rm=T) + 
+  geom_point(aes(size=FTE.Students), alpha=0.6) + 
+  geom_smooth(method="lm", se=F, color='black') +
+  scale_size(breaks=c(10000, 20000, 30000, 40000, 50000)) +
+  scale_y_continuous(labels = scales::dollar) + 
+  #scale_x_continuous(labels = scales::dollar) + 
+  labs(title="Academic Spending vs. Athletic Spending", color="Div. I Subdivision", x="Total Academic Spending (in Millions)", y="Total Athletic Spending (in Millions)") + 
+  scale_color_discrete(breaks=c(1,2,3), labels=c("FBS", "FCS", "w/o FB")) +
+  theme(axis.text.x=element_text(size=12), axis.title.x=element_text(size=14),
+        axis.text.y=element_text(size=12), axis.title.y=element_text(size=14),
+        plot.title=element_text(size=20, face="bold"), legend.position = "bottom")
+```  
+
+----
+
+```{r enroll_v_ath, echo=FALSE, warning=FALSE}
+
+# Enrollment vs. Athletic Spending
+
+ncaa %>%
+  ggplot(aes(x=FTE.Students, y=TOT_ATH_SPEND/mil)) + 
+  geom_point(aes(color=factor(SUB_DIV)), size=4, alpha=0.6) + 
+  labs(title="FT Enrollment vs. Athletic Spending", color="Div. I Subdivision", x="FTE Students", y="TOTAL ATH. SPENDING (in Millions)") + 
+  geom_smooth(method="lm", se=F, color='black') + 
+  scale_y_continuous(labels = scales::dollar) + 
+  theme(axis.text.x=element_text(size=12), axis.title.x=element_text(size=14),
+        axis.text.y=element_text(size=12), axis.title.y=element_text(size=14),
+        plot.title=element_text(size=20, face="bold"), legend.position = "bottom")
+``` 
+
+
+----
+
+```{r pwr_five, echo=FALSE}
+
+# Expenses vs. Revenue
+
+ncaa %>% 
+  ggplot(aes(x=TOT_ATH_REVENUE/mil, y=TOT_ATH_EXPENSE/mil)) +
+  geom_point(aes(size=FTE.Students, color=factor(SUB_DIV)), alpha=.6) + 
+  scale_y_continuous(labels = scales::dollar) +
+  scale_x_continuous(labels = scales::dollar) + 
+  labs(title="Atheletic Expense vs. Revenue", color="Div. I Subdivision", x="Total Athletic Revenue (in Millions)", y="Total Athletic Expense (in Millions)") + 
+  theme(axis.text.x=element_text(size=12), axis.title.x=element_text(size=14),
+        axis.text.y=element_text(size=12), axis.title.y=element_text(size=14),
+        plot.title=element_text(size=20, face="bold"), legend.position = "bottom")
+```  
+
+----
+
+```{r oth_conf, echo=FALSE}
+
+# No FBS Schools, Revenue vs. Expenses
+
+no_fbs <- ncaa %>% 
+  filter(SUB_DIV != 1)
+
+no_fbs %>%
+  ggplot(aes(x=TOT_ATH_REVENUE/mil, y=TOT_ATH_EXPENSE/mil)) +
+  geom_point(aes(size=FTE.Students, color=factor(SUB_DIV)), alpha=.6) + 
+  scale_y_continuous(labels = scales::dollar) +
+  scale_x_continuous(labels = scales::dollar) + 
+  labs(title="Atheletic Expense vs. Revenue: No FBS", color="Div. I Subdivision", x="Total Athletic Revenue (in Millions)", y="Total Athletic Expense (in Millions)") + 
+  theme(axis.text.x=element_text(size=12), axis.title.x=element_text(size=14),
+        axis.text.y=element_text(size=12), axis.title.y=element_text(size=14),
+        plot.title=element_text(size=20, face="bold"), legend.position = "bottom")
+```  
+
+----
+
+```{r all_adm_pct, echo=FALSE, warning=FALSE}
+
+# Difference in Athletic Rev/Exp vs. Selectivity, All Inst.
+
+ncaa %>%
+  ggplot(aes(x=Admit_Rate, y=((TOT_ATH_REVENUE/mil)-(TOT_ATH_EXPENSE/mil)), fill=CONFERENCE)) +
+  geom_bar(stat='identity', position='identity', color='black', alpha=0.7) +
+  labs(title="Athletic Expense vs. Admission Selectivity", x="Admission Accept %", y="Athletic Rev - Expense (in Millions)") +
+  scale_y_continuous(labels = scales::dollar) +
+  theme(axis.text.x=element_text(size=12), axis.title.x=element_text(size=14),
+        axis.text.y=element_text(size=12), axis.title.y=element_text(size=14),
+        plot.title=element_text(size=20, face="bold"), legend.position = "bottom")
+```  
+
+----
+
+```{r conf_split, echo=FALSE}
+
+# Split up "Power 5" and everyone else
+
+pwr_five <- ncaa %>%
+  filter(grepl("Atlantic Coast Conference|Big 12 Conference|Big Ten Conference|Southeastern Conference|Pac-12 Conference", CONFERENCE))
+
+other_conf <- ncaa %>%
+  filter(!grepl("Atlantic Coast Conference|Big 12 Conference|Big Ten Conference|Southeastern Conference|Pac-12 Conference", CONFERENCE))
+```
+
+```{r pwr_five_adm_pct, echo=FALSE}
+
+# Difference in Athletic Rev/Exp vs. Selectivity, "Power 5"
+
+pwr_five %>%
+  ggplot(aes(x=Admit_Rate, y=((TOT_ATH_REVENUE/mil)-(TOT_ATH_EXPENSE/mil)), fill=CONFERENCE)) +
+  geom_bar(stat='identity', position='identity', color='black', alpha=0.6) +
+  labs(title="Athletic Expense vs. Admission Selectivity: Power 5", x="Admission Accept %", y="Athletic Rev - Expense (in Millions)") +
+  scale_y_continuous(labels = scales::dollar) +
+  theme(axis.text.x=element_text(size=12), axis.title.x=element_text(size=14),
+        axis.text.y=element_text(size=12), axis.title.y=element_text(size=14),
+        plot.title=element_text(size=20, face="bold"), legend.position = "bottom")
+```  
+
+----
+
+```{r other_conf_adm_pct, echo=FALSE, warning=FALSE}
+
+# Difference in Athletic Rev/Exp vs. Selectivity, all other conf.
+
+other_conf %>%
+  ggplot(aes(x=Admit_Rate, y=((TOT_ATH_REVENUE/mil)-(TOT_ATH_EXPENSE/mil)), fill=CONFERENCE)) +
+  geom_bar(stat='identity', position='identity', color='black', alpha=0.6) +
+  labs(title="Athletic Expense vs. Admission Selectivity: All Other Conf.", x="Admission Accept %", y="Athletic Rev - Expense (in Millions)") +
+  scale_y_continuous(labels = scales::dollar) +
+  theme(axis.text.x=element_text(size=12), axis.title.x=element_text(size=14),
+        axis.text.y=element_text(size=12), axis.title.y=element_text(size=14),
+        plot.title=element_text(size=20, face="bold"), legend.position = "bottom")
+```  
+
+----
+
+```{r top_deficit, echo=FALSE}
+
+# Create calculated column for percent difference in expense and revenue
+
+lgst_deficit <- ncaa %>%
+  select(Institution, SUB_DIV, TOT_ATH_REVENUE, TOT_ATH_EXPENSE) %>%
+  group_by(Institution, SUB_DIV) %>%
+  transmute(REV_EXP_DIFF=((TOT_ATH_REVENUE-TOT_ATH_EXPENSE)/TOT_ATH_REVENUE) * 100)
+
+# top_n or arrange was not functioning
+lgst_deficit <- lgst_deficit[order(lgst_deficit$REV_EXP_DIFF),]
+lgst_deficit <- lgst_deficit[1:10,]
+```  
+
+```{r lgst_def_plot, echo=FALSE}
+
+# Horizontal bar chart, largest % difference in athletic expenses and revenues
+
+lgst_deficit %>%
+ggplot(aes(Institution, abs(REV_EXP_DIFF))) + 
+  geom_bar(stat='identity', aes(fill=factor(SUB_DIV)), alpha=.7) + 
+  coord_flip() + 
+  labs(title="Athletic Revenues & Expenses: Largest % Difference", y="-% Difference In Revenue and Expense", fill="Div. I Subdivision") +  
+  scale_fill_discrete(breaks=c(1,2,3), labels=c("FBS", "FCS", "w/o FB")) +
+  theme(axis.text.x=element_text(size=12), axis.title.x=element_text(size=14),
+        axis.text.y=element_text(size=12), axis.title.y=element_text(size=14),
+        plot.title=element_text(size=20, face="bold"), legend.position = "bottom")
+```
+
+# Conclusion  
+
+- Many different scenarios
+- Athletic spending far outpaced by academic expenditures
+- Few institutions generate positive revenue
+- Most institutions break even on athletic expenses
+- More attention should be put onto athletic team subsidies
